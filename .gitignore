@@ -1,0 +1,5 @@
+.env
+venv-oss-rag/
+__pycache__/
+*.__pycache
+.DS_Store
