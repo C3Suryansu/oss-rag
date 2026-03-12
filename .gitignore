@@ -3,3 +3,5 @@ venv-oss-rag/
 __pycache__/
 *.__pycache
 .DS_Store
+oss_rag.egg-info/
+chroma_db/
