@@ -9,11 +9,14 @@ from src.ingestion.github_fetcher import fetch_repo_data
 from src.embeddings.embedder import embed_repo_data, chroma_client
 from src.retrieval.retriever import retrieve_and_rerank
 
+from fastapi.responses import StreamingResponse as FastAPIStreamingResponse
+import asyncio
+
 load_dotenv()
 
 app = FastAPI(title="OSS Onboarding RAG")
 anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
+anthropic_async_client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 class QueryRequest(BaseModel):
     repo_url: str
@@ -68,7 +71,55 @@ async def query_repo(request: QueryRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/query/stream")
+async def query_repo_stream(request: QueryRequest):
+    
+    async def generate():
+        try:
+            repo_name = request.repo_url.rstrip("/").split("/")[-2] + "__" + \
+                        request.repo_url.rstrip("/").split("/")[-1]
 
+            try:
+                chroma_client.get_collection(repo_name)
+            except Exception:
+                yield "Fetching and embedding repository...\n\n"
+                repo_data = fetch_repo_data(request.repo_url)
+                embed_repo_data(repo_data)
+
+            yield "Searching relevant context...\n\n"
+            results = retrieve_and_rerank(request.question, repo_name)
+
+            context = "\n\n".join([
+                f"[Source: {r['metadata']['source']}]\n{r['text']}"
+                for r in results
+            ])
+
+            prompt = f"""You are an expert OSS onboarding assistant helping beginners contribute to open source projects.
+            Use the following context from the repository to answer the question:{context}
+            Question: {request.question}
+            Give a clear, beginner-friendly answer based only on the context provided."""
+
+            # Use async client instead of sync client
+            async with anthropic_async_client.messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}]
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+
+        except Exception as e:
+            yield f"Error: {str(e)}"
+
+    return FastAPIStreamingResponse(
+        generate(),
+        media_type="text/plain",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        }
+    )
 
 @app.get("/health")
 async def health():
