@@ -1,6 +1,7 @@
 import os
 from github import Auth, Github
 from dotenv import load_dotenv
+from langsmith import traceable
 
 load_dotenv()
 
@@ -9,6 +10,7 @@ def get_github_client():
     auth = Auth.Token(token)
     return Github(auth=auth)
 
+@traceable(name="fetch_repo_data")
 def fetch_repo_data(repo_url: str) -> dict:
     """
     Given a GitHub repo URL, fetches:
@@ -56,7 +58,7 @@ def fetch_repo_data(repo_url: str) -> dict:
             data["file_structure"] = [contents.path]
     except Exception as e:
         print(f"Could not fetch file structure: {e}")
-        
+
     # Fetch good first issues
     try:
         issues = repo.get_issues(state="open", labels=["good first issue"])

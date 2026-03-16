@@ -4,6 +4,7 @@ import chromadb
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import List, Dict
+from langsmith import traceable
 
 load_dotenv()
 
@@ -11,7 +12,7 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 cohere_client = cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-
+@traceable(name="get_query_embedding")
 def get_query_embedding(query: str) -> List[float]:
     """Convert user query to embedding vector."""
     response = openai_client.embeddings.create(
@@ -20,7 +21,7 @@ def get_query_embedding(query: str) -> List[float]:
     )
     return response.data[0].embedding
 
-
+@traceable(name="chromadb_retrieve")
 def retrieve(query: str, collection_name: str, top_k: int = 10) -> List[Dict]:
     """
     Stage 1: Semantic search — fetch top_k candidate chunks from ChromaDB.
@@ -44,7 +45,7 @@ def retrieve(query: str, collection_name: str, top_k: int = 10) -> List[Dict]:
 
     return candidates
 
-
+@traceable(name="cohere_rerank")
 def rerank(query: str, candidates: List[Dict], top_n: int = 3) -> List[Dict]:
     """
     Stage 2: Cohere reranking — reorder candidates by true relevance.
@@ -66,7 +67,7 @@ def rerank(query: str, candidates: List[Dict], top_n: int = 3) -> List[Dict]:
 
     return reranked
 
-
+@traceable(name="retrieve_and_rerank")
 def retrieve_and_rerank(query: str, collection_name: str) -> List[Dict]:
     """
     Full two-stage retrieval pipeline.
