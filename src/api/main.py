@@ -18,11 +18,12 @@ app = FastAPI(title="OSS Onboarding RAG")
 anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 anthropic_async_client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+class SkillMatchRequest(BaseModel):
+    skills: list[str]
 
 class QueryRequest(BaseModel):
     repo_url: str
     question: str
-
 
 class QueryResponse(BaseModel):
     answer: str
@@ -125,7 +126,18 @@ async def query_repo_stream(request: QueryRequest):
             "Cache-Control": "no-cache",
         }
     )
+@traceable(name="crewai_skill_match")
+def run_skill_match(skills: list[str]) -> str:
+    from src.agents.skill_matcher import match_skills_to_repos
+    return match_skills_to_repos(skills)
 
+@app.post("/skill-match")
+async def skill_match(request: SkillMatchRequest):
+    try:
+        result = run_skill_match(request.skills)
+        return {"result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health():
