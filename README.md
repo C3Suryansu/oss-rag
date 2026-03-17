@@ -166,7 +166,7 @@ LANGCHAIN_PROJECT=oss-rag
 
 ---
 
-## Roadmap
+## Roadmap (WIP)
 
 - [ ] CrewAI skill-matching engine
 - [ ] LangGraph conversational agent

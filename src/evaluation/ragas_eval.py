@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from datasets import Dataset
 from ragas import evaluate
-from ragas.metrics.collections import Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall
+from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall
 from ragas.llms import llm_factory
 from ragas.embeddings import embedding_factory, OpenAIEmbeddings
 from src.retrieval.retriever import retrieve_and_rerank
