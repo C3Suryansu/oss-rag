@@ -168,7 +168,7 @@ LANGCHAIN_PROJECT=oss-rag
 
 ## Roadmap (WIP)
 
-- [ ] CrewAI skill-matching engine
+- ✅ CrewAI skill-matching engine
 - [ ] LangGraph conversational agent
 - [ ] MCP server for GitHub tooling
 - [ ] Qdrant migration + vector DB comparison
