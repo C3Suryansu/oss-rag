@@ -33,6 +33,10 @@ class IssueAnalyzerRequest(BaseModel):
     repo_full_name: str
     skills: list[str]
 
+class DeepDiveRequest(BaseModel):
+    repo_full_name: str
+    issue_number: int
+
 @traceable(name="crewai_issue_analyzer")
 def run_issue_analyzer(repo_full_name: str, skills: list[str]) -> str:
     from src.agents.issue_analyzer import analyze_issues
@@ -45,6 +49,20 @@ async def analyze_issues_endpoint(request: IssueAnalyzerRequest):
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@traceable(name="crewai_issue_deepdive")
+def run_issue_deepdive(repo_full_name: str, issue_number: int) -> str:
+    from src.agents.issue_deepdive import deepdive_issue
+    return deepdive_issue(repo_full_name, issue_number)
+
+@app.post("/deepdive-issue")
+async def deepdive_issue_endpoint(request: DeepDiveRequest):
+    try:
+        result = run_issue_deepdive(request.repo_full_name, request.issue_number)
+        return {"result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @traceable(name="claude_generate")
 def generate_answer(context: str, question: str) -> str:

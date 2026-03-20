@@ -16,7 +16,7 @@ st.set_page_config(
 st.title("OSS Onboarding Assistant")
 st.markdown("Your AI-powered guide to open source contribution.")
 
-tab1, tab2, tab3 = st.tabs(["🔍 Find Repos for My Skills","Analyze Issues", "💬 Ask About a Repo"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 Find Repos for My Skills","Analyze Issues", "💬 Ask About a Repo", "Deep Dive Issue"])
 
 # --- Tab 1: Skill Matching ---
 with tab1:
@@ -78,6 +78,7 @@ with tab2:
                         st.error(f"Error: {response.text}")
                 except Exception as e:
                     st.error(f"Could not connect to API: {e}")
+
 # --- Tab 3: Ask About a Repo ---
 with tab3:
     st.markdown("### Ask Anything About a Repository")
@@ -113,3 +114,29 @@ with tab3:
                 st.write_stream(stream_response())
             except Exception as e:
                 st.error(f"Could not connect to API: {e}")
+# --- Tab 4: Deep Dive into an issue
+with tab4:
+    st.markdown("### Deep Dive on a Specific Issue")
+    st.markdown("Paste a repo and issue number — get a full breakdown with reproduction steps and file pointers.")
+
+    repo_dd = st.text_input("GitHub Repo (owner/repo)", placeholder="pytorch/pytorch", key="repo_dd")
+    issue_num = st.number_input("Issue Number", min_value=1, step=1)
+    dd_submitted = st.button("Deep Dive", use_container_width=True)
+
+    if dd_submitted:
+        if not repo_dd:
+            st.error("Please provide a repo")
+        else:
+            with st.spinner("Analyzing issue... this takes 2-3 minutes"):
+                try:
+                    response = requests.post(
+                        f"{API_URL}/deepdive-issue",
+                        json={"repo_full_name": repo_dd, "issue_number": int(issue_num)}
+                    )
+                    if response.status_code == 200:
+                        st.markdown("### Issue Deep-Dive")
+                        st.markdown(response.json()["result"])
+                    else:
+                        st.error(f"Error: {response.text}")
+                except Exception as e:
+                    st.error(f"Could not connect to API: {e}")
