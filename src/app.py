@@ -16,7 +16,7 @@ st.set_page_config(
 st.title("OSS Onboarding Assistant")
 st.markdown("Your AI-powered guide to open source contribution.")
 
-tab1, tab2 = st.tabs(["🔍 Find Repos for My Skills", "💬 Ask About a Repo"])
+tab1, tab2, tab3 = st.tabs(["🔍 Find Repos for My Skills","Analyze Issues", "💬 Ask About a Repo"])
 
 # --- Tab 1: Skill Matching ---
 with tab1:
@@ -43,8 +43,43 @@ with tab1:
                 except Exception as e:
                     st.error(f"Could not connect to API: {e}")
                     
-# --- Tab 2: Ask About a Repo ---
+
+# --- Tab 2: Find the best issues to work on
 with tab2:
+    st.markdown("### Find the Right Issues to Work On")
+    st.markdown("Enter a repo and your skills — get top 2-3 issues ranked by beginner-friendliness.")
+
+    repo_input = st.text_input(
+        "GitHub Repo (owner/repo)",
+        placeholder="pytorch/pytorch"
+    )
+    skills_input2 = st.text_input(
+        "Your Skills",
+        placeholder="python, machine learning, pytorch",
+        key="skills2"
+    )
+    analyze_submitted = st.button("Analyze Issues", use_container_width=True)
+
+    if analyze_submitted:
+        if not repo_input or not skills_input2:
+            st.error("Please provide both a repo and your skills")
+        else:
+            skills = [s.strip() for s in skills_input2.split(",")]
+            with st.spinner("Analyzing issues... this takes 2-3 minutes"):
+                try:
+                    response = requests.post(
+                        f"{API_URL}/analyze-issues",
+                        json={"repo_full_name": repo_input, "skills": skills}
+                    )
+                    if response.status_code == 200:
+                        st.markdown("### Recommended Issues")
+                        st.markdown(response.json()["result"])
+                    else:
+                        st.error(f"Error: {response.text}")
+                except Exception as e:
+                    st.error(f"Could not connect to API: {e}")
+# --- Tab 3: Ask About a Repo ---
+with tab3:
     st.markdown("### Ask Anything About a Repository")
 
     repo_url = st.text_input(

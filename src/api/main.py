@@ -29,6 +29,22 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list
 
+class IssueAnalyzerRequest(BaseModel):
+    repo_full_name: str
+    skills: list[str]
+
+@traceable(name="crewai_issue_analyzer")
+def run_issue_analyzer(repo_full_name: str, skills: list[str]) -> str:
+    from src.agents.issue_analyzer import analyze_issues
+    return analyze_issues(repo_full_name, skills)
+
+@app.post("/analyze-issues")
+async def analyze_issues_endpoint(request: IssueAnalyzerRequest):
+    try:
+        result = run_issue_analyzer(request.repo_full_name, request.skills)
+        return {"result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @traceable(name="claude_generate")
 def generate_answer(context: str, question: str) -> str:
