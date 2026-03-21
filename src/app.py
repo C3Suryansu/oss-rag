@@ -16,7 +16,14 @@ st.set_page_config(
 st.title("OSS Onboarding Assistant")
 st.markdown("Your AI-powered guide to open source contribution.")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Find Repos for My Skills","Analyze Issues", "💬 Ask About a Repo", "Deep Dive Issue", "Navigate the Codebase for deeper issuedive"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["🔍 Find Repos for My Skills",
+     "Analyze Issues", 
+     "💬 Ask About a Repo", 
+     "Deep Dive Issue", 
+     "Navigate the Codebase for deeper issuedive",
+     "Complete contribution Agent"]
+    )
 
 # --- Tab 1: Skill Matching ---
 with tab1:
@@ -168,6 +175,47 @@ with tab5:
                     if response.status_code == 200:
                         st.markdown("### Code Navigation Result")
                         st.markdown(response.json()["result"])
+                    else:
+                        st.error(f"Error: {response.text}")
+                except Exception as e:
+                    st.error(f"Could not connect to API: {e}")
+# --- Tab 6: Complete contribution agent
+with tab6:
+    st.markdown("### Full Contribution Guide")
+    st.markdown("Give a repo, issue number, and your skills — get a complete contribution guide.")
+
+    repo_ca = st.text_input("GitHub Repo (owner/repo)", placeholder="scikit-learn/scikit-learn", key="repo_ca")
+    issue_ca = st.number_input("Issue Number", min_value=1, step=1, key="issue_ca")
+    skills_ca = st.text_input("Your Skills", placeholder="python, machine learning", key="skills_ca")
+    question_ca = st.text_area("Specific Question (optional)", placeholder="Where should I add the fix?", height=80, key="question_ca")
+    ca_submitted = st.button("Get Contribution Guide", use_container_width=True)
+
+    if ca_submitted:
+        if not repo_ca or not skills_ca:
+            st.error("Please provide repo and skills")
+        else:
+            skills = [s.strip() for s in skills_ca.split(",")]
+            with st.spinner("Running contribution agent... this takes 3-5 minutes"):
+                try:
+                    response = requests.post(
+                        f"{API_URL}/contribution-agent",
+                        json={
+                            "skills": skills,
+                            "selected_repo": repo_ca,
+                            "selected_issue": int(issue_ca),
+                            "question": question_ca or None
+                        }
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        st.markdown("### Deep Dive")
+                        st.markdown(data["deepdive"])
+                        st.markdown("### Code Navigation")
+                        st.markdown(data["navigation"])
+                        if data["file_paths"]:
+                            st.markdown("### Relevant Files")
+                            for f in data["file_paths"]:
+                                st.code(f)
                     else:
                         st.error(f"Error: {response.text}")
                 except Exception as e:

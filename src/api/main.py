@@ -42,6 +42,33 @@ class CodebaseNavRequest(BaseModel):
     file_paths: list[str]
     question: str
 
+class ContributionAgentRequest(BaseModel):
+    skills: list[str]
+    selected_repo: str
+    selected_issue: int
+    question: str = None
+
+@traceable(name="langgraph_contribution_agent")
+def run_contribution_agent(skills: list[str], selected_repo: str, selected_issue: int, question: str = None) -> dict:
+    from src.agents.contribution_agent import run_contribution_agent as _run
+    return _run(skills, selected_repo, selected_issue, question)
+
+@app.post("/contribution-agent")
+async def contribution_agent_endpoint(request: ContributionAgentRequest):
+    try:
+        result = run_contribution_agent(
+            request.skills,
+            request.selected_repo,
+            request.selected_issue,
+            request.question
+        )
+        return {
+            "deepdive": result.get("deepdive", ""),
+            "navigation": result.get("navigation", ""),
+            "file_paths": result.get("file_paths", [])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @traceable(name="codebase_navigator")
 def run_codebase_navigator(repo_full_name: str, file_paths: list[str], question: str) -> str:
