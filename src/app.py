@@ -16,7 +16,7 @@ st.set_page_config(
 st.title("OSS Onboarding Assistant")
 st.markdown("Your AI-powered guide to open source contribution.")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 Find Repos for My Skills","Analyze Issues", "💬 Ask About a Repo", "Deep Dive Issue"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Find Repos for My Skills","Analyze Issues", "💬 Ask About a Repo", "Deep Dive Issue", "Navigate the Codebase for deeper issuedive"])
 
 # --- Tab 1: Skill Matching ---
 with tab1:
@@ -135,6 +135,38 @@ with tab4:
                     )
                     if response.status_code == 200:
                         st.markdown("### Issue Deep-Dive")
+                        st.markdown(response.json()["result"])
+                    else:
+                        st.error(f"Error: {response.text}")
+                except Exception as e:
+                    st.error(f"Could not connect to API: {e}")
+# --- Tab 5: Navigate the codebase
+with tab5:
+    st.markdown("### Navigate the Codebase")
+    st.markdown("Give a repo and file paths — ask questions about the code.")
+
+    repo_nav = st.text_input("GitHub Repo (owner/repo)", placeholder="scikit-learn/scikit-learn", key="repo_nav")
+    files_nav = st.text_input("File Paths (comma separated)", placeholder="sklearn/utils/validation.py", key="files_nav")
+    question_nav = st.text_area("Your Question", placeholder="Where should I add input validation for a new parameter?", height=100, key="question_nav")
+    nav_submitted = st.button("Navigate", use_container_width=True)
+
+    if nav_submitted:
+        if not repo_nav or not files_nav or not question_nav:
+            st.error("Please fill in all fields")
+        else:
+            file_paths = [f.strip() for f in files_nav.split(",")]
+            with st.spinner("Navigating codebase..."):
+                try:
+                    response = requests.post(
+                        f"{API_URL}/navigate-codebase",
+                        json={
+                            "repo_full_name": repo_nav,
+                            "file_paths": file_paths,
+                            "question": question_nav
+                        }
+                    )
+                    if response.status_code == 200:
+                        st.markdown("### Code Navigation Result")
                         st.markdown(response.json()["result"])
                     else:
                         st.error(f"Error: {response.text}")

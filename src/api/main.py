@@ -37,6 +37,26 @@ class DeepDiveRequest(BaseModel):
     repo_full_name: str
     issue_number: int
 
+class CodebaseNavRequest(BaseModel):
+    repo_full_name: str
+    file_paths: list[str]
+    question: str
+
+
+@traceable(name="codebase_navigator")
+def run_codebase_navigator(repo_full_name: str, file_paths: list[str], question: str) -> str:
+    from src.agents.codebase_navigator import navigate_codebase
+    return navigate_codebase(repo_full_name, file_paths, question)
+
+@app.post("/navigate-codebase")
+async def navigate_codebase_endpoint(request: CodebaseNavRequest):
+    try:
+        result = run_codebase_navigator(request.repo_full_name, request.file_paths, request.question)
+        return {"result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
 @traceable(name="crewai_issue_analyzer")
 def run_issue_analyzer(repo_full_name: str, skills: list[str]) -> str:
     from src.agents.issue_analyzer import analyze_issues
