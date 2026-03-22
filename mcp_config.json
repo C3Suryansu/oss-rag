@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "oss-rag": {
+      "command": "python",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": "/Users/c3wiz/projects/oss-rag",
+      "env": {
+        "PYTHONPATH": "/Users/c3wiz/projects/oss-rag"
+      }
+    }
+  }
+}
