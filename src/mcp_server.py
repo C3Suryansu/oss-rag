@@ -6,6 +6,7 @@ from mcp.server.stdio import stdio_server
 from mcp import types
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 # Initialize MCP server
