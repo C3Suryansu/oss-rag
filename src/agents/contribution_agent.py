@@ -197,7 +197,34 @@ def run_conversational_agent(skills: list[str]):
     print(result["deepdive"][:1000])
     print("\n=== CODE NAVIGATION ===")
     print(result["navigation"][:1000])
+    print("\n✅ Contribution guide complete!\n")
+    print("Ask follow-up questions about the code, or type 'done' to exit.\n")
 
+    while True:
+        follow_up = input("👉 Your question: ").strip()
+        if follow_up.lower() in ["done", "exit", "quit", ""]:
+            print("\n🎉 Good luck with your contribution!")
+            break
+
+        from src.agents.codebase_navigator import navigate_codebase
+        if result.get("file_paths"):
+            answer = navigate_codebase(
+                result["selected_repo"],
+                result["file_paths"],
+                follow_up
+            )
+        else:
+            # No files extracted — use Claude directly
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": f"Context: We are working on {result['selected_repo']} issue #{result['selected_issue']}.\n\nDeep dive summary:\n{result['deepdive'][:500]}\n\nQuestion: {follow_up}"}]
+            )
+            answer = response.content[0].text
+
+        print(f"\n{answer}\n")
     return result
 
 if __name__ == "__main__":
