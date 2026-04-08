@@ -166,15 +166,24 @@ LANGCHAIN_PROJECT=oss-rag
 
 ---
 
-## Roadmap (WIP)
+## Live Demo
+
+| Service | URL |
+|---------|-----|
+| Streamlit UI | _deploying_ |
+| FastAPI docs | _deploying_ |
+
+---
+
+## Roadmap
 
 - ✅ CrewAI skill-matching engine
-- [ ] LangGraph conversational agent
-- [ ] MCP server for GitHub tooling
-- [ ] Qdrant migration + vector DB comparison
+- ✅ LangGraph conversational agent with human-in-the-loop
+- ✅ MCP server (fetch_repo_data, search_beginner_issues, get_issue_details, suggest_contribution)
+- ✅ Fine-tuned LoRA/QLoRA Mistral-7B advisor node (adapter training script included)
+- ✅ Docker + deployment pipeline
 - [ ] RAGAS evaluation scores
-- [ ] Fine-tuned issue difficulty classifier (LoRA)
-- [ ] GCP Cloud Run deployment
+- [ ] Qdrant migration + vector DB comparison
 
 ---
 
