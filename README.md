@@ -170,7 +170,7 @@ LANGCHAIN_PROJECT=oss-rag
 
 | Service | URL |
 |---------|-----|
-| Streamlit UI | _coming soon_ |
+| Streamlit UI | http://136.115.102.47:8501 |
 | FastAPI docs | https://beneficial-enthusiasm-production-ca9f.up.railway.app/docs |
 
 ---
