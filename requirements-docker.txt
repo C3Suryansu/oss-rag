@@ -33,6 +33,7 @@ ragas>=0.1.0
 
 # MCP
 mcp>=1.0.0
+starlette>=0.27.0
 
 # Utilities
 requests>=2.28.0

@@ -1,222 +1,242 @@
 import streamlit as st
 import requests
-import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import re
 
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
 st.set_page_config(
-    page_title="OSS Onboarding Assistant",
+    page_title="OSS Contribution Assistant",
     page_icon="🚀",
     layout="centered"
 )
 
-st.title("OSS Onboarding Assistant")
-st.markdown("Your AI-powered guide to open source contribution.")
+st.title("OSS Contribution Assistant")
+st.caption("Your AI guide to open source contribution. Tell me your skills to get started.")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-    ["🔍 Find Repos for My Skills",
-     "Analyze Issues", 
-     "💬 Ask About a Repo", 
-     "Deep Dive Issue", 
-     "Navigate the Codebase for deeper issuedive",
-     "Complete contribution Agent"]
-    )
+# ── Session state init ─────────────────────────────────────────────────────────
 
-# --- Tab 1: Skill Matching ---
-with tab1:
-    st.markdown("### Find OSS Repos Matching Your Skills")
-    skills_input = st.text_input("Your Skills", placeholder="python, machine learning, pytorch")
-    find_submitted = st.button("Find Repos", use_container_width=True)
+defaults = {
+    "messages": [],
+    "phase": "skills",
+    "skills": [],
+    "selected_repo": None,
+    "selected_issue": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-    if find_submitted:
-        if not skills_input:
-            st.error("Please enter at least one skill")
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def add_message(role: str, content: str):
+    st.session_state.messages.append({"role": role, "content": content})
+
+def call_skill_match(skills):
+    try:
+        r = requests.post(f"{API_URL}/skill-match", json={"skills": skills}, timeout=300)
+        return r.json()["result"] if r.status_code == 200 else None
+    except Exception:
+        return None
+
+def call_analyze_issues(repo, skills):
+    try:
+        r = requests.post(f"{API_URL}/analyze-issues", json={"repo_full_name": repo, "skills": skills}, timeout=300)
+        return r.json()["result"] if r.status_code == 200 else None
+    except Exception:
+        return None
+
+def call_contribution_agent(repo, issue, skills):
+    try:
+        r = requests.post(f"{API_URL}/contribution-agent", json={
+            "skills": skills,
+            "selected_repo": repo,
+            "selected_issue": issue,
+            "question": None
+        }, timeout=600)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+def call_query(repo, question):
+    try:
+        r = requests.post(f"{API_URL}/query", json={
+            "repo_url": f"https://github.com/{repo}",
+            "question": question
+        }, timeout=120)
+        return r.json().get("answer") if r.status_code == 200 else None
+    except Exception:
+        return None
+
+def extract_repo(text):
+    text = text.strip()
+    if "github.com/" in text:
+        parts = text.split("github.com/")[-1].strip("/").split("/")
+        return f"{parts[0]}/{parts[1]}"
+    return text
+
+def extract_issue_number(text):
+    match = re.search(r'\d+', text)
+    return int(match.group()) if match else None
+
+# ── Render chat history ───────────────────────────────────────────────────────
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# ── Phase: skills ─────────────────────────────────────────────────────────────
+
+if st.session_state.phase == "skills":
+    if prompt := st.chat_input("Tell me your skills (e.g. Python, machine learning, React)..."):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        add_message("user", prompt)
+
+        skills = [s.strip() for s in re.split(r"[,\s]+", prompt) if s.strip()]
+        st.session_state.skills = skills
+
+        with st.chat_message("assistant"):
+            with st.spinner("Finding repos that match your skills... (2-3 min)"):
+                result = call_skill_match(skills)
+
+            if result:
+                response = (
+                    f"Here are some repos that match your skills:\n\n{result}\n\n"
+                    "**Which repo would you like to explore?** "
+                    "Enter the name in `owner/repo` format or paste the GitHub URL."
+                )
+                st.markdown(response)
+                add_message("assistant", response)
+                st.session_state.phase = "repo_select"
+            else:
+                msg = "Sorry, I couldn't fetch repos right now. Please try again."
+                st.error(msg)
+                add_message("assistant", msg)
+
+        st.rerun()
+
+# ── Phase: repo_select ────────────────────────────────────────────────────────
+
+elif st.session_state.phase == "repo_select":
+    if prompt := st.chat_input("Enter the repo (e.g. pytorch/pytorch or a GitHub URL)..."):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        add_message("user", prompt)
+
+        repo = extract_repo(prompt)
+        st.session_state.selected_repo = repo
+
+        with st.chat_message("assistant"):
+            with st.spinner(f"Analyzing issues in {repo}... (2-3 min)"):
+                result = call_analyze_issues(repo, st.session_state.skills)
+
+            if result:
+                response = (
+                    f"Here are the best issues for you in **{repo}**:\n\n{result}\n\n"
+                    "**Which issue do you want to work on?** Enter the issue number."
+                )
+                st.markdown(response)
+                add_message("assistant", response)
+                st.session_state.phase = "issue_select"
+            else:
+                msg = f"Couldn't analyze issues for `{repo}`. Check the repo name and try again."
+                st.error(msg)
+                add_message("assistant", msg)
+
+        st.rerun()
+
+# ── Phase: issue_select ───────────────────────────────────────────────────────
+
+elif st.session_state.phase == "issue_select":
+    if prompt := st.chat_input("Enter the issue number (e.g. 42)..."):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        add_message("user", prompt)
+
+        issue_number = extract_issue_number(prompt)
+
+        if not issue_number:
+            with st.chat_message("assistant"):
+                msg = "Please enter a valid issue number (just the number, e.g. `42`)."
+                st.markdown(msg)
+                add_message("assistant", msg)
         else:
-            skills = [s.strip() for s in skills_input.split(",")]
-            with st.spinner("Finding and ranking repos... this takes 2-3 minutes"):
-                try:
-                    response = requests.post(
-                        f"{API_URL}/skill-match",
-                        json={"skills": skills}
+            st.session_state.selected_issue = issue_number
+            repo = st.session_state.selected_repo
+
+            with st.chat_message("assistant"):
+                with st.spinner(f"Running full analysis on {repo} #{issue_number}... (3-5 min)"):
+                    data = call_contribution_agent(repo, issue_number, st.session_state.skills)
+
+                if data:
+                    parts = []
+                    if data.get("deepdive"):
+                        parts.append(f"### Issue Deep Dive\n{data['deepdive']}")
+                    if data.get("navigation"):
+                        parts.append(f"### Codebase Navigation\n{data['navigation']}")
+                    if data.get("file_paths"):
+                        files = "\n".join([f"- `{f}`" for f in data["file_paths"]])
+                        parts.append(f"### Relevant Files\n{files}")
+                    if data.get("contribution_plan"):
+                        parts.append(f"### Contribution Plan\n{data['contribution_plan']}")
+
+                    parts.append(
+                        "---\n**Have a follow-up question?** Ask me anything about this repo or issue. "
+                        "Or use the sidebar to start a new conversation."
                     )
-                    if response.status_code == 200:
-                        st.markdown("### Recommended Repos")
-                        st.markdown(response.json()["result"])
-                    else:
-                        st.error(f"Error: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to API: {e}")
-                    
 
-# --- Tab 2: Find the best issues to work on
-with tab2:
-    st.markdown("### Find the Right Issues to Work On")
-    st.markdown("Enter a repo and your skills — get top 2-3 issues ranked by beginner-friendliness.")
+                    response = "\n\n".join(parts)
+                    st.markdown(response)
+                    add_message("assistant", response)
+                    st.session_state.phase = "done"
+                else:
+                    msg = "Analysis failed. Please try again."
+                    st.error(msg)
+                    add_message("assistant", msg)
 
-    repo_input = st.text_input(
-        "GitHub Repo (owner/repo)",
-        placeholder="pytorch/pytorch"
-    )
-    skills_input2 = st.text_input(
-        "Your Skills",
-        placeholder="python, machine learning, pytorch",
-        key="skills2"
-    )
-    analyze_submitted = st.button("Analyze Issues", use_container_width=True)
+        st.rerun()
 
-    if analyze_submitted:
-        if not repo_input or not skills_input2:
-            st.error("Please provide both a repo and your skills")
-        else:
-            skills = [s.strip() for s in skills_input2.split(",")]
-            with st.spinner("Analyzing issues... this takes 2-3 minutes"):
-                try:
-                    response = requests.post(
-                        f"{API_URL}/analyze-issues",
-                        json={"repo_full_name": repo_input, "skills": skills}
-                    )
-                    if response.status_code == 200:
-                        st.markdown("### Recommended Issues")
-                        st.markdown(response.json()["result"])
-                    else:
-                        st.error(f"Error: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to API: {e}")
+# ── Phase: done (follow-up questions) ────────────────────────────────────────
 
-# --- Tab 3: Ask About a Repo ---
-with tab3:
-    st.markdown("### Ask Anything About a Repository")
+elif st.session_state.phase == "done":
+    if prompt := st.chat_input("Ask a follow-up question about this repo or issue..."):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        add_message("user", prompt)
 
-    repo_url = st.text_input(
-        "GitHub Repository URL",
-        placeholder="https://github.com/kubeflow/pipelines"
-    )
-    question = st.text_area(
-        "Your Question",
-        placeholder="How do I set up this project locally?",
-        height=100
-    )
-    submitted = st.button("Ask", use_container_width=True)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                answer = call_query(st.session_state.selected_repo, prompt)
 
-    if submitted:
-        if not repo_url or not question:
-            st.error("Please provide both a repository URL and question")
-        else:
-            st.markdown("### Answer")
+            if answer:
+                st.markdown(answer)
+                add_message("assistant", answer)
+            else:
+                msg = "Couldn't get an answer. Try rephrasing your question."
+                st.error(msg)
+                add_message("assistant", msg)
 
-            def stream_response():
-                with requests.post(
-                    f"{API_URL}/query/stream",
-                    json={"repo_url": repo_url, "question": question},
-                    stream=True
-                ) as response:
-                    for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
-                        if chunk:
-                            yield chunk
+        st.rerun()
 
-            try:
-                st.write_stream(stream_response())
-            except Exception as e:
-                st.error(f"Could not connect to API: {e}")
-# --- Tab 4: Deep Dive into an issue
-with tab4:
-    st.markdown("### Deep Dive on a Specific Issue")
-    st.markdown("Paste a repo and issue number — get a full breakdown with reproduction steps and file pointers.")
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 
-    repo_dd = st.text_input("GitHub Repo (owner/repo)", placeholder="pytorch/pytorch", key="repo_dd")
-    issue_num = st.number_input("Issue Number", min_value=1, step=1)
-    dd_submitted = st.button("Deep Dive", use_container_width=True)
+with st.sidebar:
+    st.markdown("### Current Session")
 
-    if dd_submitted:
-        if not repo_dd:
-            st.error("Please provide a repo")
-        else:
-            with st.spinner("Analyzing issue... this takes 2-3 minutes"):
-                try:
-                    response = requests.post(
-                        f"{API_URL}/deepdive-issue",
-                        json={"repo_full_name": repo_dd, "issue_number": int(issue_num)}
-                    )
-                    if response.status_code == 200:
-                        st.markdown("### Issue Deep-Dive")
-                        st.markdown(response.json()["result"])
-                    else:
-                        st.error(f"Error: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to API: {e}")
-# --- Tab 5: Navigate the codebase
-with tab5:
-    st.markdown("### Navigate the Codebase")
-    st.markdown("Give a repo and file paths — ask questions about the code.")
+    if st.session_state.skills:
+        st.markdown(f"**Skills:** {', '.join(st.session_state.skills)}")
+    if st.session_state.selected_repo:
+        st.markdown(f"**Repo:** `{st.session_state.selected_repo}`")
+    if st.session_state.selected_issue:
+        st.markdown(f"**Issue:** #{st.session_state.selected_issue}")
 
-    repo_nav = st.text_input("GitHub Repo (owner/repo)", placeholder="scikit-learn/scikit-learn", key="repo_nav")
-    files_nav = st.text_input("File Paths (comma separated)", placeholder="sklearn/utils/validation.py", key="files_nav")
-    question_nav = st.text_area("Your Question", placeholder="Where should I add input validation for a new parameter?", height=100, key="question_nav")
-    nav_submitted = st.button("Navigate", use_container_width=True)
+    if not st.session_state.skills:
+        st.caption("No active session yet.")
 
-    if nav_submitted:
-        if not repo_nav or not files_nav or not question_nav:
-            st.error("Please fill in all fields")
-        else:
-            file_paths = [f.strip() for f in files_nav.split(",")]
-            with st.spinner("Navigating codebase..."):
-                try:
-                    response = requests.post(
-                        f"{API_URL}/navigate-codebase",
-                        json={
-                            "repo_full_name": repo_nav,
-                            "file_paths": file_paths,
-                            "question": question_nav
-                        }
-                    )
-                    if response.status_code == 200:
-                        st.markdown("### Code Navigation Result")
-                        st.markdown(response.json()["result"])
-                    else:
-                        st.error(f"Error: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to API: {e}")
-# --- Tab 6: Complete contribution agent
-with tab6:
-    st.markdown("### Full Contribution Guide")
-    st.markdown("Give a repo, issue number, and your skills — get a complete contribution guide.")
+    st.markdown("---")
 
-    repo_ca = st.text_input("GitHub Repo (owner/repo)", placeholder="scikit-learn/scikit-learn", key="repo_ca")
-    issue_ca = st.number_input("Issue Number", min_value=1, step=1, key="issue_ca")
-    skills_ca = st.text_input("Your Skills", placeholder="python, machine learning", key="skills_ca")
-    question_ca = st.text_area("Specific Question (optional)", placeholder="Where should I add the fix?", height=80, key="question_ca")
-    ca_submitted = st.button("Get Contribution Guide", use_container_width=True)
-
-    if ca_submitted:
-        if not repo_ca or not skills_ca:
-            st.error("Please provide repo and skills")
-        else:
-            skills = [s.strip() for s in skills_ca.split(",")]
-            with st.spinner("Running contribution agent... this takes 3-5 minutes"):
-                try:
-                    response = requests.post(
-                        f"{API_URL}/contribution-agent",
-                        json={
-                            "skills": skills,
-                            "selected_repo": repo_ca,
-                            "selected_issue": int(issue_ca),
-                            "question": question_ca or None
-                        }
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        st.markdown("### Deep Dive")
-                        st.markdown(data["deepdive"])
-                        st.markdown("### Code Navigation")
-                        st.markdown(data["navigation"])
-                        if data["file_paths"]:
-                            st.markdown("### Relevant Files")
-                            for f in data["file_paths"]:
-                                st.code(f)
-                    else:
-                        st.error(f"Error: {response.text}")
-                except Exception as e:
-                    st.error(f"Could not connect to API: {e}")
+    if st.button("New Conversation", use_container_width=True, type="primary"):
+        for k in defaults:
+            st.session_state[k] = defaults[k]
+        st.rerun()
