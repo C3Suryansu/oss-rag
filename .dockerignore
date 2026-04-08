@@ -1,0 +1,25 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+venv-oss-rag/
+venv/
+.venv/
+
+# Env — NEVER bake secrets into the image
+.env
+
+# Fine-tune artifacts (large, not needed for API)
+finetune/data/
+finetune/adapters/
+
+# Local dev
+.DS_Store
+*.log

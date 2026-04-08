@@ -1,0 +1,12 @@
+# Local testing only — simulates what Cloud Run will do
+# Usage: docker-compose up --build
+
+services:
+  oss-rag:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env          # your API keys — never committed to git
+    volumes:
+      - ./chroma_db:/app/chroma_db   # persist vector data across restarts locally
