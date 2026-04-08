@@ -170,8 +170,8 @@ LANGCHAIN_PROJECT=oss-rag
 
 | Service | URL |
 |---------|-----|
-| Streamlit UI | _deploying_ |
-| FastAPI docs | _deploying_ |
+| Streamlit UI | _coming soon_ |
+| FastAPI docs | https://beneficial-enthusiasm-production-ca9f.up.railway.app/docs |
 
 ---
 
