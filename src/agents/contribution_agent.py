@@ -19,6 +19,7 @@ class AgentState(TypedDict):
     deepdive: str                 # output from deep dive
     file_paths: list[str]         # extracted from deep dive
     navigation: str               # output from codebase navigator
+    contribution_plan: str        # output from fine-tuned advisor (LoRA/QLoRA Mistral-7B)
     question: str                 # user's code question
     messages: Annotated[list, add_messages]  # conversation history
     next_step: str                # routing signal
@@ -60,13 +61,36 @@ def navigate_node(state: AgentState) -> AgentState:
     """Navigate codebase for relevant files."""
     from src.agents.codebase_navigator import navigate_codebase
     print(f"\n🧭 Navigating codebase: {state['file_paths']}")
-    
+
     if not state.get("file_paths"):
-        return {**state, "navigation": "No specific files identified.", "next_step": "end"}
-    
+        return {**state, "navigation": "No specific files identified.", "next_step": "finetuned_advisor"}
+
     question = state.get("question") or "Where should I make changes to fix this issue?"
     result = navigate_codebase(state["selected_repo"], state["file_paths"], question)
-    return {**state, "navigation": result, "next_step": "end"}
+    return {**state, "navigation": result, "next_step": "finetuned_advisor"}
+
+
+def finetuned_advisor_node(state: AgentState) -> AgentState:
+    """
+    Fine-tuned LoRA/QLoRA Mistral-7B advisor node.
+    Uses the deepdive + navigation context to generate a contribution plan.
+    Falls back gracefully if MLX adapter isn't trained yet.
+    """
+    print(f"\n🤖 Fine-tuned advisor generating contribution plan...")
+    try:
+        from finetune.inference import get_advisor
+        advisor = get_advisor()
+        # Use deepdive output as issue body — it contains the full issue context
+        plan = advisor.suggest(
+            repo=state.get("selected_repo", ""),
+            issue_title=f"Issue #{state.get('selected_issue', '')}",
+            issue_body=(state.get("deepdive", "") + "\n\n" + state.get("navigation", ""))[:1500],
+        )
+        print("  ✓ Fine-tuned plan generated")
+    except Exception as e:
+        print(f"  ⚠️  Fine-tuned model not ready ({e}) — skipping, adapter not trained yet")
+        plan = ""
+    return {**state, "contribution_plan": plan, "next_step": "end"}
 
 
 # --- Routing ---
@@ -84,6 +108,7 @@ def build_graph(memory = None):
     graph.add_node("issue_analyze", issue_analyze_node)
     graph.add_node("deepdive", deepdive_node)
     graph.add_node("navigate", navigate_node)
+    graph.add_node("finetuned_advisor", finetuned_advisor_node)
 
     graph.set_entry_point("skill_match")
 
@@ -99,7 +124,11 @@ def build_graph(memory = None):
         "navigate": "navigate",
         "end": END
     })
-    graph.add_edge("navigate", END)
+    graph.add_conditional_edges("navigate", router, {
+        "finetuned_advisor": "finetuned_advisor",
+        "end": END
+    })
+    graph.add_edge("finetuned_advisor", END)
 
 
     # MemorySaver enables interrupt_before to work

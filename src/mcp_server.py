@@ -70,6 +70,33 @@ async def list_tools() -> list[types.Tool]:
                 },
                 "required": ["repo_full_name", "issue_number"]
             }
+        ),
+        types.Tool(
+            name="suggest_contribution",
+            description=(
+                "Use the fine-tuned LoRA/QLoRA Mistral-7B model to generate a detailed "
+                "contribution plan for a GitHub issue. Returns what to change, which files "
+                "are likely involved, and a suggested PR description. "
+                "Requires finetune/train.sh to have been run first."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {
+                        "type": "string",
+                        "description": "Repository in owner/repo format (e.g. langchain-ai/langchain)"
+                    },
+                    "issue_title": {
+                        "type": "string",
+                        "description": "Title of the GitHub issue"
+                    },
+                    "issue_body": {
+                        "type": "string",
+                        "description": "Body/description of the GitHub issue"
+                    }
+                },
+                "required": ["repo_full_name", "issue_title", "issue_body"]
+            }
         )
     ]
 
@@ -145,6 +172,19 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "url": issue["html_url"]
         }
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "suggest_contribution":
+        try:
+            from finetune.inference import get_advisor
+            advisor = get_advisor()
+            plan = advisor.suggest(
+                repo=arguments["repo_full_name"],
+                issue_title=arguments["issue_title"],
+                issue_body=arguments["issue_body"],
+            )
+            return [types.TextContent(type="text", text=plan)]
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Fine-tuned model not ready: {e}. Run finetune/train.sh first.")]
 
     else:
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]

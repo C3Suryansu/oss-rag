@@ -223,3 +223,30 @@ async def skill_match(request: SkillMatchRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Fine-tuned advisor endpoint ──────────────────────────────────────────────
+
+class FinetuneAdvisorRequest(BaseModel):
+    repo: str
+    issue_title: str
+    issue_body: str
+
+@traceable(name="finetuned_advisor_mlx")
+def run_finetuned_advisor(repo: str, issue_title: str, issue_body: str) -> str:
+    from finetune.inference import get_advisor
+    return get_advisor().suggest(repo=repo, issue_title=issue_title, issue_body=issue_body)
+
+@app.post("/contribution-agent/finetuned")
+async def finetuned_advisor_endpoint(request: FinetuneAdvisorRequest):
+    """
+    Calls the LoRA/QLoRA fine-tuned Mistral-7B adapter directly.
+    Run finetune/train.sh first to produce the adapter weights.
+    """
+    try:
+        plan = run_finetuned_advisor(request.repo, request.issue_title, request.issue_body)
+        return {"contribution_plan": plan}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=f"Fine-tuned model not ready: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
