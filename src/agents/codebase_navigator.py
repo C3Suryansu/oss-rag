@@ -9,8 +9,10 @@ from langsmith import traceable
 
 load_dotenv()
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
+
+def _openai():
+    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def get_headers():
     return {
@@ -94,7 +96,7 @@ def embed_code_files(repo_full_name: str, file_paths: list[str]) -> str:
     
     # Generate embeddings
     texts = [c["text"] for c in all_chunks]
-    response = openai_client.embeddings.create(
+    response = _openai().embeddings.create(
         input=texts,
         model="text-embedding-3-small"
     )
@@ -125,7 +127,7 @@ def navigate_codebase(repo_full_name: str, file_paths: list[str], question: str)
     
     # Retrieve relevant chunks
     collection = chroma_client.get_collection(collection_name)
-    query_response = openai_client.embeddings.create(
+    query_response = _openai().embeddings.create(
         input=question,
         model="text-embedding-3-small"
     )

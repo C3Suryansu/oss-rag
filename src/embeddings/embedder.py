@@ -6,8 +6,10 @@ from typing import List, Dict
 
 load_dotenv()
 
-client = OpenAI(api_key = os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path = "./chroma_db")
+
+def _openai():
+    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """
@@ -38,7 +40,7 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
 
 def get_embedding(text: str) -> List[float]:
     """Generate OpenAI embedding for a single text."""
-    response = client.embeddings.create(
+    response = _openai().embeddings.create(
         input=text,
         model="text-embedding-3-small"
     )
@@ -47,7 +49,7 @@ def get_embedding(text: str) -> List[float]:
 
 def get_embedding(text: str) -> List[float]:
     """Generate OpenAI embedding for a single text."""
-    response = client.embeddings.create(
+    response = _openai().embeddings.create(
         input=text,
         model="text-embedding-3-small"
     )

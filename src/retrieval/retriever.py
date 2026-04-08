@@ -8,14 +8,18 @@ from langsmith import traceable
 
 load_dotenv()
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-cohere_client = cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
+
+def _openai():
+    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def _cohere():
+    return cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
 
 @traceable(name="get_query_embedding")
 def get_query_embedding(query: str) -> List[float]:
     """Convert user query to embedding vector."""
-    response = openai_client.embeddings.create(
+    response = _openai().embeddings.create(
         input=query,
         model="text-embedding-3-small"
     )
@@ -52,7 +56,7 @@ def rerank(query: str, candidates: List[Dict], top_n: int = 3) -> List[Dict]:
     """
     documents = [c["text"] for c in candidates]
 
-    response = cohere_client.rerank(
+    response = _cohere().rerank(
         model="rerank-v3.5",
         query=query,
         documents=documents,

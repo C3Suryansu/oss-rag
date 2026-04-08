@@ -18,10 +18,13 @@ st.caption("Your AI guide to open source contribution. Tell me your skills to ge
 
 defaults = {
     "messages": [],
-    "phase": "skills",
+    "phase": "setup",        # setup → skills → repo_select → issue_select → done
     "skills": [],
     "selected_repo": None,
     "selected_issue": None,
+    "anthropic_key": None,
+    "openai_key": None,
+    "github_pat": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -32,16 +35,27 @@ for k, v in defaults.items():
 def add_message(role: str, content: str):
     st.session_state.messages.append({"role": role, "content": content})
 
+def user_headers():
+    """Build request headers from user-provided API keys stored in session."""
+    h = {}
+    if st.session_state.anthropic_key:
+        h["X-Anthropic-Key"] = st.session_state.anthropic_key
+    if st.session_state.openai_key:
+        h["X-OpenAI-Key"] = st.session_state.openai_key
+    if st.session_state.github_pat:
+        h["X-GitHub-PAT"] = st.session_state.github_pat
+    return h
+
 def call_skill_match(skills):
     try:
-        r = requests.post(f"{API_URL}/skill-match", json={"skills": skills}, timeout=300)
+        r = requests.post(f"{API_URL}/skill-match", json={"skills": skills}, headers=user_headers(), timeout=300)
         return r.json()["result"] if r.status_code == 200 else None
     except Exception:
         return None
 
 def call_analyze_issues(repo, skills):
     try:
-        r = requests.post(f"{API_URL}/analyze-issues", json={"repo_full_name": repo, "skills": skills}, timeout=300)
+        r = requests.post(f"{API_URL}/analyze-issues", json={"repo_full_name": repo, "skills": skills}, headers=user_headers(), timeout=300)
         return r.json()["result"] if r.status_code == 200 else None
     except Exception:
         return None
@@ -53,7 +67,7 @@ def call_contribution_agent(repo, issue, skills):
             "selected_repo": repo,
             "selected_issue": issue,
             "question": None
-        }, timeout=600)
+        }, headers=user_headers(), timeout=600)
         return r.json() if r.status_code == 200 else None
     except Exception:
         return None
@@ -63,7 +77,7 @@ def call_query(repo, question):
         r = requests.post(f"{API_URL}/query", json={
             "repo_url": f"https://github.com/{repo}",
             "question": question
-        }, timeout=120)
+        }, headers=user_headers(), timeout=120)
         return r.json().get("answer") if r.status_code == 200 else None
     except Exception:
         return None
@@ -85,9 +99,51 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# ── Phase: setup (key collection) ────────────────────────────────────────────
+
+if st.session_state.phase == "setup":
+    st.markdown("### Before we start")
+    st.markdown(
+        "This app uses your own API keys so you're billed directly — "
+        "your keys are never stored and only sent to the backend for your session."
+    )
+
+    with st.form("setup_form"):
+        anthropic_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            placeholder="sk-ant-...",
+            help="Get yours at console.anthropic.com"
+        )
+        openai_key = st.text_input(
+            "OpenAI API Key",
+            type="password",
+            placeholder="sk-proj-...",
+            help="Get yours at platform.openai.com/api-keys"
+        )
+        github_pat = st.text_input(
+            "GitHub Personal Access Token",
+            type="password",
+            placeholder="github_pat_...",
+            help="Get yours at github.com/settings/tokens (repo read scope)"
+        )
+        submitted = st.form_submit_button("Start Session", use_container_width=True, type="primary")
+
+    if submitted:
+        if not anthropic_key or not openai_key or not github_pat:
+            st.error("All three keys are required.")
+        else:
+            st.session_state.anthropic_key = anthropic_key
+            st.session_state.openai_key = openai_key
+            st.session_state.github_pat = github_pat
+            st.session_state.phase = "skills"
+            welcome = "Keys saved for this session. **Tell me your skills to get started** (e.g. Python, machine learning, React)."
+            add_message("assistant", welcome)
+            st.rerun()
+
 # ── Phase: skills ─────────────────────────────────────────────────────────────
 
-if st.session_state.phase == "skills":
+elif st.session_state.phase == "skills":
     if prompt := st.chat_input("Tell me your skills (e.g. Python, machine learning, React)..."):
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -116,7 +172,7 @@ if st.session_state.phase == "skills":
 
         st.rerun()
 
-# ── Phase: repo_select ────────────────────────────────────────────────────────
+# ── Phase: repo_select ───────────────────────────────────────────────────────
 
 elif st.session_state.phase == "repo_select":
     if prompt := st.chat_input("Enter the repo (e.g. pytorch/pytorch or a GitHub URL)..."):
@@ -237,6 +293,14 @@ with st.sidebar:
     st.markdown("---")
 
     if st.button("New Conversation", use_container_width=True, type="primary"):
+        # Keep keys — just reset conversation state
+        keys_to_keep = {
+            "anthropic_key": st.session_state.anthropic_key,
+            "openai_key": st.session_state.openai_key,
+            "github_pat": st.session_state.github_pat,
+        }
         for k in defaults:
             st.session_state[k] = defaults[k]
+        st.session_state.update(keys_to_keep)
+        st.session_state.phase = "skills"  # skip setup on reset
         st.rerun()

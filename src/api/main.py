@@ -1,10 +1,13 @@
 import os
+import threading
+from contextlib import contextmanager
 import anthropic
 import chromadb
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from langsmith import traceable
+from typing import Optional
 
 from src.ingestion.github_fetcher import fetch_repo_data
 from src.embeddings.embedder import embed_repo_data, chroma_client
@@ -15,8 +18,43 @@ from fastapi.responses import StreamingResponse as FastAPIStreamingResponse
 load_dotenv()
 
 app = FastAPI(title="OSS Onboarding RAG")
-anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-anthropic_async_client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+# ── Per-request key override ──────────────────────────────────────────────────
+# All helper modules now read keys from os.environ at call time (not module level).
+# This lock + context manager temporarily overrides env vars for the duration of
+# one request, then restores originals. Safe for a single-instance demo server.
+
+_env_lock = threading.Lock()
+
+@contextmanager
+def user_key_context(anthropic_key=None, openai_key=None, github_pat=None):
+    overrides = {}
+    if anthropic_key:
+        overrides["ANTHROPIC_API_KEY"] = anthropic_key
+    if openai_key:
+        overrides["OPENAI_API_KEY"] = openai_key
+    if github_pat:
+        overrides["GITHUB_PAT"] = github_pat
+    if not overrides:
+        yield
+        return
+    with _env_lock:
+        originals = {k: os.environ.get(k) for k in overrides}
+        os.environ.update(overrides)
+        try:
+            yield
+        finally:
+            for k, v in originals.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+def _anthropic(key=None):
+    return anthropic.Anthropic(api_key=key or os.getenv("ANTHROPIC_API_KEY"))
+
+def _anthropic_async(key=None):
+    return anthropic.AsyncAnthropic(api_key=key or os.getenv("ANTHROPIC_API_KEY"))
 
 class SkillMatchRequest(BaseModel):
     skills: list[str]
@@ -54,14 +92,20 @@ def run_contribution_agent(skills: list[str], selected_repo: str, selected_issue
     return _run(skills, selected_repo, selected_issue, question)
 
 @app.post("/contribution-agent")
-async def contribution_agent_endpoint(request: ContributionAgentRequest):
+async def contribution_agent_endpoint(
+    request: ContributionAgentRequest,
+    x_anthropic_key: Optional[str] = Header(None),
+    x_openai_key: Optional[str] = Header(None),
+    x_github_pat: Optional[str] = Header(None),
+):
     try:
-        result = run_contribution_agent(
-            request.skills,
-            request.selected_repo,
-            request.selected_issue,
-            request.question
-        )
+        with user_key_context(x_anthropic_key, x_openai_key, x_github_pat):
+            result = run_contribution_agent(
+                request.skills,
+                request.selected_repo,
+                request.selected_issue,
+                request.question
+            )
         return {
             "deepdive": result.get("deepdive", ""),
             "navigation": result.get("navigation", ""),
@@ -76,9 +120,15 @@ def run_codebase_navigator(repo_full_name: str, file_paths: list[str], question:
     return navigate_codebase(repo_full_name, file_paths, question)
 
 @app.post("/navigate-codebase")
-async def navigate_codebase_endpoint(request: CodebaseNavRequest):
+async def navigate_codebase_endpoint(
+    request: CodebaseNavRequest,
+    x_anthropic_key: Optional[str] = Header(None),
+    x_openai_key: Optional[str] = Header(None),
+    x_github_pat: Optional[str] = Header(None),
+):
     try:
-        result = run_codebase_navigator(request.repo_full_name, request.file_paths, request.question)
+        with user_key_context(x_anthropic_key, x_openai_key, x_github_pat):
+            result = run_codebase_navigator(request.repo_full_name, request.file_paths, request.question)
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -90,9 +140,13 @@ def run_issue_analyzer(repo_full_name: str, skills: list[str]) -> str:
     return analyze_issues(repo_full_name, skills)
 
 @app.post("/analyze-issues")
-async def analyze_issues_endpoint(request: IssueAnalyzerRequest):
+async def analyze_issues_endpoint(
+    request: IssueAnalyzerRequest,
+    x_github_pat: Optional[str] = Header(None),
+):
     try:
-        result = run_issue_analyzer(request.repo_full_name, request.skills)
+        with user_key_context(github_pat=x_github_pat):
+            result = run_issue_analyzer(request.repo_full_name, request.skills)
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -103,22 +157,26 @@ def run_issue_deepdive(repo_full_name: str, issue_number: int) -> str:
     return deepdive_issue(repo_full_name, issue_number)
 
 @app.post("/deepdive-issue")
-async def deepdive_issue_endpoint(request: DeepDiveRequest):
+async def deepdive_issue_endpoint(
+    request: DeepDiveRequest,
+    x_github_pat: Optional[str] = Header(None),
+):
     try:
-        result = run_issue_deepdive(request.repo_full_name, request.issue_number)
+        with user_key_context(github_pat=x_github_pat):
+            result = run_issue_deepdive(request.repo_full_name, request.issue_number)
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @traceable(name="claude_generate")
-def generate_answer(context: str, question: str) -> str:
+def generate_answer(context: str, question: str, anthropic_key: str = None) -> str:
     """Synchronous Claude call used by /query endpoint — fully traceable."""
     prompt = f"""You are an expert OSS onboarding assistant helping beginners contribute to open source projects.
     Use the following context from the repository to answer the question:{context}
     Question: {question}
     Give a clear, beginner-friendly answer based only on the context provided."""
-    response = anthropic_client.messages.create(
+    response = _anthropic(anthropic_key).messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
@@ -127,7 +185,7 @@ def generate_answer(context: str, question: str) -> str:
 
 
 @traceable(name="oss_rag_query")
-def run_rag_pipeline(repo_url: str, question: str) -> dict:
+def run_rag_pipeline(repo_url: str, question: str, anthropic_key: str = None) -> dict:
     """Full RAG pipeline — traced as a single top-level span."""
     repo_name = repo_url.rstrip("/").split("/")[-2] + "__" + \
                 repo_url.rstrip("/").split("/")[-1]
@@ -145,23 +203,34 @@ def run_rag_pipeline(repo_url: str, question: str) -> dict:
         for r in results
     ])
 
-    answer = generate_answer(context, question)
+    answer = generate_answer(context, question, anthropic_key)
     sources = [r["metadata"]["source"] for r in results]
 
     return {"answer": answer, "sources": sources}
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query_repo(request: QueryRequest):
+async def query_repo(
+    request: QueryRequest,
+    x_anthropic_key: Optional[str] = Header(None),
+    x_openai_key: Optional[str] = Header(None),
+    x_github_pat: Optional[str] = Header(None),
+):
     try:
-        result = run_rag_pipeline(request.repo_url, request.question)
+        with user_key_context(x_anthropic_key, x_openai_key, x_github_pat):
+            result = run_rag_pipeline(request.repo_url, request.question, anthropic_key=x_anthropic_key)
         return QueryResponse(answer=result["answer"], sources=result["sources"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/query/stream")
-async def query_repo_stream(request: QueryRequest):
+async def query_repo_stream(
+    request: QueryRequest,
+    x_anthropic_key: Optional[str] = Header(None),
+    x_openai_key: Optional[str] = Header(None),
+    x_github_pat: Optional[str] = Header(None),
+):
 
     async def generate():
         try:
@@ -188,7 +257,7 @@ async def query_repo_stream(request: QueryRequest):
             Question: {request.question}
             Give a clear, beginner-friendly answer based only on the context provided."""
 
-            async with anthropic_async_client.messages.stream(
+            async with _anthropic_async(x_anthropic_key).messages.stream(
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}]
@@ -213,9 +282,13 @@ def run_skill_match(skills: list[str]) -> str:
     return match_skills_to_repos(skills)
 
 @app.post("/skill-match")
-async def skill_match(request: SkillMatchRequest):
+async def skill_match(
+    request: SkillMatchRequest,
+    x_github_pat: Optional[str] = Header(None),
+):
     try:
-        result = run_skill_match(request.skills)
+        with user_key_context(github_pat=x_github_pat):
+            result = run_skill_match(request.skills)
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
