@@ -84,7 +84,7 @@ class ContributionAgentRequest(BaseModel):
     skills: list[str]
     selected_repo: str
     selected_issue: int
-    question: str = None
+    question: Optional[str] = None
 
 @traceable(name="langgraph_contribution_agent")
 def run_contribution_agent(skills: list[str], selected_repo: str, selected_issue: int, question: str = None) -> dict:
