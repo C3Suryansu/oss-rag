@@ -2,8 +2,14 @@ import streamlit as st
 import requests
 import os
 import re
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
 
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
+SESSIONS_DIR = Path("sessions")
+SESSIONS_DIR.mkdir(exist_ok=True)
 
 st.set_page_config(
     page_title="OSS Contribution Assistant",
@@ -14,11 +20,86 @@ st.set_page_config(
 st.title("OSS Contribution Assistant")
 st.caption("Your AI guide to open source contribution. Tell me your skills to get started.")
 
-# ── Session state init ─────────────────────────────────────────────────────────
+# ── Session persistence helpers ───────────────────────────────────────────────
+
+def _session_path(sid: str) -> Path:
+    return SESSIONS_DIR / f"{sid}.json"
+
+def save_session(sid: str):
+    """Persist conversation state to disk (never saves API keys)."""
+    data = {
+        "session_id": sid,
+        "updated_at": datetime.now().isoformat(),
+        "phase": st.session_state.phase,
+        "skills": st.session_state.skills,
+        "selected_repo": st.session_state.selected_repo,
+        "selected_issue": st.session_state.selected_issue,
+        "messages": st.session_state.messages,
+    }
+    try:
+        _session_path(sid).write_text(json.dumps(data, ensure_ascii=False))
+    except Exception:
+        pass
+
+def load_session(sid: str) -> bool:
+    """Load a saved session into session_state. Returns True on success."""
+    path = _session_path(sid)
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text())
+        st.session_state.phase = data.get("phase", "done")
+        st.session_state.skills = data.get("skills", [])
+        st.session_state.selected_repo = data.get("selected_repo")
+        st.session_state.selected_issue = data.get("selected_issue")
+        st.session_state.messages = data.get("messages", [])
+        return True
+    except Exception:
+        return False
+
+def list_sessions(limit: int = 15):
+    """Return recent sessions sorted newest-first, excluding the current one."""
+    current = st.session_state.get("_session_id", "")
+    sessions = []
+    for f in SESSIONS_DIR.glob("*.json"):
+        if f.stem == current:
+            continue
+        try:
+            data = json.loads(f.read_text())
+            if data.get("messages"):  # skip empty sessions
+                sessions.append(data)
+        except Exception:
+            pass
+    return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)[:limit]
+
+def _session_label(s: dict) -> str:
+    skills = ", ".join(s.get("skills") or []) or "—"
+    repo = s.get("selected_repo") or "no repo yet"
+    issue = f" #{s['selected_issue']}" if s.get("selected_issue") else ""
+    updated = s.get("updated_at", "")[:10]
+    return f"{skills} → {repo}{issue}  ({updated})"
+
+# ── Init session_id from URL param ───────────────────────────────────────────
+
+if "_session_id" not in st.session_state:
+    params = st.query_params
+    if "s" in params:
+        sid = params["s"]
+        st.session_state["_session_id"] = sid
+        st.session_state["_session_loaded"] = False  # will load below
+    else:
+        sid = uuid.uuid4().hex[:10]
+        st.session_state["_session_id"] = sid
+        st.session_state["_session_loaded"] = True   # fresh session, nothing to load
+        st.query_params["s"] = sid
+
+sid = st.session_state["_session_id"]
+
+# ── Session state defaults ────────────────────────────────────────────────────
 
 defaults = {
     "messages": [],
-    "phase": "setup",        # setup → skills → repo_select → issue_select → done
+    "phase": "setup",
     "skills": [],
     "selected_repo": None,
     "selected_issue": None,
@@ -31,13 +112,24 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# ── Load saved session on first render (URL param was set) ────────────────────
+
+if not st.session_state.get("_session_loaded", True):
+    loaded = load_session(sid)
+    st.session_state["_session_loaded"] = True
+    if loaded:
+        # If the saved phase requires API calls, ask for keys first
+        if st.session_state.phase not in ("setup", "skills"):
+            st.session_state["_needs_keys_to_continue"] = True
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def add_message(role: str, content: str):
     st.session_state.messages.append({"role": role, "content": content})
+    save_session(sid)
 
 def user_headers():
-    """Build request headers from session. Sends admin passphrase if set, otherwise user API keys."""
+    """Build request headers. Sends admin passphrase if set, otherwise user API keys."""
     h = {}
     if st.session_state.admin_passphrase:
         h["X-Admin-Passphrase"] = st.session_state.admin_passphrase
@@ -49,6 +141,14 @@ def user_headers():
     if st.session_state.github_pat:
         h["X-GitHub-PAT"] = st.session_state.github_pat
     return h
+
+def has_keys() -> bool:
+    return bool(
+        st.session_state.admin_passphrase
+        or st.session_state.anthropic_key
+        or st.session_state.openai_key
+        or st.session_state.github_pat
+    )
 
 def call_skill_match(skills):
     try:
@@ -103,9 +203,33 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# ── Inline key form for resuming a loaded session ─────────────────────────────
+
+if st.session_state.get("_needs_keys_to_continue") and not has_keys():
+    st.info("This is a saved conversation. Enter your API keys to continue, or just scroll up to review it.")
+    with st.form("resume_keys_form"):
+        anthropic_key = st.text_input("Anthropic API Key", type="password", placeholder="sk-ant-...")
+        openai_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-proj-...")
+        github_pat = st.text_input("GitHub PAT", type="password", placeholder="github_pat_...")
+        st.markdown("---")
+        admin_passphrase = st.text_input("Admin Passphrase (owner only)", type="password", placeholder="optional")
+        resume = st.form_submit_button("Continue Session", use_container_width=True, type="primary")
+    if resume:
+        if admin_passphrase:
+            st.session_state.admin_passphrase = admin_passphrase
+        elif anthropic_key or openai_key or github_pat:
+            st.session_state.anthropic_key = anthropic_key
+            st.session_state.openai_key = openai_key
+            st.session_state.github_pat = github_pat
+        else:
+            st.error("Enter at least one key to continue.")
+        if has_keys():
+            st.session_state["_needs_keys_to_continue"] = False
+            st.rerun()
+
 # ── Phase: setup (key collection) ────────────────────────────────────────────
 
-if st.session_state.phase == "setup":
+elif st.session_state.phase == "setup":
     st.markdown("### Before we start")
     st.markdown(
         "This app uses your own API keys so you're billed directly — "
@@ -114,27 +238,20 @@ if st.session_state.phase == "setup":
 
     with st.form("setup_form"):
         anthropic_key = st.text_input(
-            "Anthropic API Key",
-            type="password",
-            placeholder="sk-ant-...",
+            "Anthropic API Key", type="password", placeholder="sk-ant-...",
             help="Get yours at console.anthropic.com"
         )
         openai_key = st.text_input(
-            "OpenAI API Key",
-            type="password",
-            placeholder="sk-proj-...",
+            "OpenAI API Key", type="password", placeholder="sk-proj-...",
             help="Get yours at platform.openai.com/api-keys"
         )
         github_pat = st.text_input(
-            "GitHub Personal Access Token",
-            type="password",
-            placeholder="github_pat_...",
+            "GitHub Personal Access Token", type="password", placeholder="github_pat_...",
             help="Get yours at github.com/settings/tokens (repo read scope)"
         )
         st.markdown("---")
         admin_passphrase = st.text_input(
-            "Admin Passphrase (optional — owner only)",
-            type="password",
+            "Admin Passphrase (optional — owner only)", type="password",
             placeholder="Leave blank if you're a public user",
             help="If you have the admin passphrase, enter it here instead of the keys above."
         )
@@ -142,7 +259,6 @@ if st.session_state.phase == "setup":
 
     if submitted:
         if admin_passphrase:
-            # Admin path — passphrase bypasses key requirement
             st.session_state.admin_passphrase = admin_passphrase
             st.session_state.phase = "skills"
             welcome = "Admin session started. **Tell me your skills to get started** (e.g. Python, machine learning, React)."
@@ -183,6 +299,7 @@ elif st.session_state.phase == "skills":
                 st.markdown(response)
                 add_message("assistant", response)
                 st.session_state.phase = "repo_select"
+                save_session(sid)
             else:
                 msg = "Sorry, I couldn't fetch repos right now. Please try again."
                 st.error(msg)
@@ -213,6 +330,7 @@ elif st.session_state.phase == "repo_select":
                 st.markdown(response)
                 add_message("assistant", response)
                 st.session_state.phase = "issue_select"
+                save_session(sid)
             else:
                 msg = f"Couldn't analyze issues for `{repo}`. Check the repo name and try again."
                 st.error(msg)
@@ -264,6 +382,7 @@ elif st.session_state.phase == "issue_select":
                     st.markdown(response)
                     add_message("assistant", response)
                     st.session_state.phase = "done"
+                    save_session(sid)
                 else:
                     msg = "Analysis failed. Please try again."
                     st.error(msg)
@@ -308,10 +427,18 @@ with st.sidebar:
     if not st.session_state.skills:
         st.caption("No active session yet.")
 
+    # Share link
+    base = os.getenv("APP_URL", "http://136.115.102.47:8501")
+    share_url = f"{base}/?s={sid}"
+    st.markdown(f"**Session link:** [copy]({share_url})")
+    st.caption("Bookmark this URL to resume later.")
+
     st.markdown("---")
 
     if st.button("New Conversation", use_container_width=True, type="primary"):
-        # Keep keys — just reset conversation state
+        save_session(sid)  # save current before resetting
+        # New session = new ID + clear conversation state, keep keys
+        new_sid = uuid.uuid4().hex[:10]
         keys_to_keep = {
             "anthropic_key": st.session_state.anthropic_key,
             "openai_key": st.session_state.openai_key,
@@ -321,5 +448,29 @@ with st.sidebar:
         for k in defaults:
             st.session_state[k] = defaults[k]
         st.session_state.update(keys_to_keep)
-        st.session_state.phase = "skills"  # skip setup on reset
+        st.session_state["_session_id"] = new_sid
+        st.session_state["_session_loaded"] = True
+        st.session_state.phase = "skills"
+        st.query_params["s"] = new_sid
         st.rerun()
+
+    st.markdown("---")
+
+    # ── Previous conversations ─────────────────────────────────────────────────
+    past = list_sessions()
+    if past:
+        st.markdown("### Previous Conversations")
+        for s in past:
+            label = _session_label(s)
+            if st.button(label, key=f"load_{s['session_id']}", use_container_width=True):
+                save_session(sid)  # save current first
+                target_sid = s["session_id"]
+                # Reset all state, then load the target session
+                for k in defaults:
+                    st.session_state[k] = defaults[k]
+                st.session_state["_session_id"] = target_sid
+                st.session_state["_session_loaded"] = False  # trigger load on next render
+                st.query_params["s"] = target_sid
+                st.rerun()
+    else:
+        st.caption("Previous conversations will appear here.")
