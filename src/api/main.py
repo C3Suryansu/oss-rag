@@ -19,6 +19,34 @@ load_dotenv()
 
 app = FastAPI(title="OSS Onboarding RAG")
 
+# ── Admin passphrase ──────────────────────────────────────────────────────────
+# Set ADMIN_PASSPHRASE in Railway env vars to let the owner bypass the key
+# requirement. Any request that sends a matching X-Admin-Passphrase header will
+# use the server's own API keys instead of needing to supply user keys.
+_ADMIN_PASSPHRASE = os.getenv("ADMIN_PASSPHRASE", "")
+
+def _admin_match(passphrase: Optional[str]) -> bool:
+    return bool(_ADMIN_PASSPHRASE and passphrase and passphrase == _ADMIN_PASSPHRASE)
+
+def _require_keys(
+    x_anthropic_key: Optional[str],
+    x_openai_key: Optional[str],
+    x_github_pat: Optional[str],
+    x_admin_passphrase: Optional[str],
+) -> None:
+    """Raise 401 if no user keys and no valid admin passphrase."""
+    if _admin_match(x_admin_passphrase):
+        return
+    if x_anthropic_key or x_openai_key or x_github_pat:
+        return
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "API keys required. Provide X-Anthropic-Key, X-OpenAI-Key, and "
+            "X-GitHub-PAT request headers, or a valid X-Admin-Passphrase."
+        ),
+    )
+
 # ── Per-request key override ──────────────────────────────────────────────────
 # All helper modules now read keys from os.environ at call time (not module level).
 # This lock + context manager temporarily overrides env vars for the duration of
@@ -97,9 +125,12 @@ async def contribution_agent_endpoint(
     x_anthropic_key: Optional[str] = Header(None),
     x_openai_key: Optional[str] = Header(None),
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(x_anthropic_key, x_openai_key, x_github_pat, x_admin_passphrase)
     try:
-        with user_key_context(x_anthropic_key, x_openai_key, x_github_pat):
+        keys = (None, None, None) if _admin_match(x_admin_passphrase) else (x_anthropic_key, x_openai_key, x_github_pat)
+        with user_key_context(*keys):
             result = run_contribution_agent(
                 request.skills,
                 request.selected_repo,
@@ -125,9 +156,12 @@ async def navigate_codebase_endpoint(
     x_anthropic_key: Optional[str] = Header(None),
     x_openai_key: Optional[str] = Header(None),
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(x_anthropic_key, x_openai_key, x_github_pat, x_admin_passphrase)
     try:
-        with user_key_context(x_anthropic_key, x_openai_key, x_github_pat):
+        keys = (None, None, None) if _admin_match(x_admin_passphrase) else (x_anthropic_key, x_openai_key, x_github_pat)
+        with user_key_context(*keys):
             result = run_codebase_navigator(request.repo_full_name, request.file_paths, request.question)
         return {"result": result}
     except Exception as e:
@@ -143,9 +177,12 @@ def run_issue_analyzer(repo_full_name: str, skills: list[str]) -> str:
 async def analyze_issues_endpoint(
     request: IssueAnalyzerRequest,
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(None, None, x_github_pat, x_admin_passphrase)
     try:
-        with user_key_context(github_pat=x_github_pat):
+        pat = None if _admin_match(x_admin_passphrase) else x_github_pat
+        with user_key_context(github_pat=pat):
             result = run_issue_analyzer(request.repo_full_name, request.skills)
         return {"result": result}
     except Exception as e:
@@ -160,9 +197,12 @@ def run_issue_deepdive(repo_full_name: str, issue_number: int) -> str:
 async def deepdive_issue_endpoint(
     request: DeepDiveRequest,
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(None, None, x_github_pat, x_admin_passphrase)
     try:
-        with user_key_context(github_pat=x_github_pat):
+        pat = None if _admin_match(x_admin_passphrase) else x_github_pat
+        with user_key_context(github_pat=pat):
             result = run_issue_deepdive(request.repo_full_name, request.issue_number)
         return {"result": result}
     except Exception as e:
@@ -215,10 +255,15 @@ async def query_repo(
     x_anthropic_key: Optional[str] = Header(None),
     x_openai_key: Optional[str] = Header(None),
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(x_anthropic_key, x_openai_key, x_github_pat, x_admin_passphrase)
     try:
-        with user_key_context(x_anthropic_key, x_openai_key, x_github_pat):
-            result = run_rag_pipeline(request.repo_url, request.question, anthropic_key=x_anthropic_key)
+        is_admin = _admin_match(x_admin_passphrase)
+        keys = (None, None, None) if is_admin else (x_anthropic_key, x_openai_key, x_github_pat)
+        with user_key_context(*keys):
+            result = run_rag_pipeline(request.repo_url, request.question,
+                                      anthropic_key=None if is_admin else x_anthropic_key)
         return QueryResponse(answer=result["answer"], sources=result["sources"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -230,7 +275,11 @@ async def query_repo_stream(
     x_anthropic_key: Optional[str] = Header(None),
     x_openai_key: Optional[str] = Header(None),
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(x_anthropic_key, x_openai_key, x_github_pat, x_admin_passphrase)
+    is_admin = _admin_match(x_admin_passphrase)
+    _key = None if is_admin else x_anthropic_key
 
     async def generate():
         try:
@@ -257,7 +306,7 @@ async def query_repo_stream(
             Question: {request.question}
             Give a clear, beginner-friendly answer based only on the context provided."""
 
-            async with _anthropic_async(x_anthropic_key).messages.stream(
+            async with _anthropic_async(_key).messages.stream(
                 model="claude-sonnet-4-6",
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}]
@@ -285,9 +334,12 @@ def run_skill_match(skills: list[str]) -> str:
 async def skill_match(
     request: SkillMatchRequest,
     x_github_pat: Optional[str] = Header(None),
+    x_admin_passphrase: Optional[str] = Header(None),
 ):
+    _require_keys(None, None, x_github_pat, x_admin_passphrase)
     try:
-        with user_key_context(github_pat=x_github_pat):
+        pat = None if _admin_match(x_admin_passphrase) else x_github_pat
+        with user_key_context(github_pat=pat):
             result = run_skill_match(request.skills)
         return {"result": result}
     except Exception as e:

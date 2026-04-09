@@ -25,6 +25,7 @@ defaults = {
     "anthropic_key": None,
     "openai_key": None,
     "github_pat": None,
+    "admin_passphrase": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -36,8 +37,11 @@ def add_message(role: str, content: str):
     st.session_state.messages.append({"role": role, "content": content})
 
 def user_headers():
-    """Build request headers from user-provided API keys stored in session."""
+    """Build request headers from session. Sends admin passphrase if set, otherwise user API keys."""
     h = {}
+    if st.session_state.admin_passphrase:
+        h["X-Admin-Passphrase"] = st.session_state.admin_passphrase
+        return h
     if st.session_state.anthropic_key:
         h["X-Anthropic-Key"] = st.session_state.anthropic_key
     if st.session_state.openai_key:
@@ -127,11 +131,25 @@ if st.session_state.phase == "setup":
             placeholder="github_pat_...",
             help="Get yours at github.com/settings/tokens (repo read scope)"
         )
+        st.markdown("---")
+        admin_passphrase = st.text_input(
+            "Admin Passphrase (optional — owner only)",
+            type="password",
+            placeholder="Leave blank if you're a public user",
+            help="If you have the admin passphrase, enter it here instead of the keys above."
+        )
         submitted = st.form_submit_button("Start Session", use_container_width=True, type="primary")
 
     if submitted:
-        if not anthropic_key or not openai_key or not github_pat:
-            st.error("All three keys are required.")
+        if admin_passphrase:
+            # Admin path — passphrase bypasses key requirement
+            st.session_state.admin_passphrase = admin_passphrase
+            st.session_state.phase = "skills"
+            welcome = "Admin session started. **Tell me your skills to get started** (e.g. Python, machine learning, React)."
+            add_message("assistant", welcome)
+            st.rerun()
+        elif not anthropic_key or not openai_key or not github_pat:
+            st.error("All three keys are required (or enter the admin passphrase).")
         else:
             st.session_state.anthropic_key = anthropic_key
             st.session_state.openai_key = openai_key
@@ -298,6 +316,7 @@ with st.sidebar:
             "anthropic_key": st.session_state.anthropic_key,
             "openai_key": st.session_state.openai_key,
             "github_pat": st.session_state.github_pat,
+            "admin_passphrase": st.session_state.admin_passphrase,
         }
         for k in defaults:
             st.session_state[k] = defaults[k]
