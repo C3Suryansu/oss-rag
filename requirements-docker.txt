@@ -24,8 +24,8 @@ langsmith>=0.1.0
 crewai>=1.0.0
 crewai-tools>=1.0.0
 
-# Vector DBs — pin to <1.0 to avoid chromadb Rust bindings panic on Linux
-chromadb==0.5.23
+# Vector DBs — relaxed so pip can resolve crewai/chromadb conflict
+chromadb>=1.0.0
 qdrant-client>=1.0.0
 
 # RAG / eval

@@ -23,3 +23,4 @@ finetune/adapters/
 # Local dev
 .DS_Store
 *.log
+chroma_db/
