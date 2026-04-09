@@ -139,15 +139,25 @@ def build_graph(memory = None):
     )
 
 
-""" Commenting this part -> Used for streamlit segment on the UI
 def run_contribution_agent(
     skills: list[str],
     selected_repo: str,
     selected_issue: int,
     question: str = None
 ) -> dict:
-    # Run the full contribution agent pipeline.
-    graph = build_graph()
+    """Run the full pipeline non-interactively (used by the API endpoint)."""
+    # Build a graph without interrupt_before so it executes end-to-end in one call
+    g = StateGraph(AgentState)
+    g.add_node("issue_analyze", issue_analyze_node)
+    g.add_node("deepdive", deepdive_node)
+    g.add_node("navigate", navigate_node)
+    g.add_node("finetuned_advisor", finetuned_advisor_node)
+    g.set_entry_point("issue_analyze")
+    g.add_conditional_edges("issue_analyze", router, {"select_issue": "deepdive", "end": END})
+    g.add_conditional_edges("deepdive", router, {"navigate": "navigate", "end": END})
+    g.add_conditional_edges("navigate", router, {"finetuned_advisor": "finetuned_advisor", "end": END})
+    g.add_edge("finetuned_advisor", END)
+    compiled = g.compile()
 
     initial_state = AgentState(
         skills=skills,
@@ -158,15 +168,13 @@ def run_contribution_agent(
         deepdive="",
         file_paths=[],
         navigation="",
+        contribution_plan="",
         question=question or "Where should I make changes to fix this issue?",
         messages=[],
-        next_step="select_repo"
+        next_step="select_issue"
     )
 
-    # Start from issue_analyze since we already have repo + issue
-    result = graph.invoke(initial_state)
-    return result
-"""
+    return compiled.invoke(initial_state)
 
 # For the conversational chatbot
 def run_conversational_agent(skills: list[str]):
