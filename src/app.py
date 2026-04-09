@@ -118,9 +118,8 @@ if not st.session_state.get("_session_loaded", True):
     loaded = load_session(sid)
     st.session_state["_session_loaded"] = True
     if loaded:
-        # If the saved phase requires API calls, ask for keys first
-        if st.session_state.phase not in ("setup", "skills"):
-            st.session_state["_needs_keys_to_continue"] = True
+        # Always ask for keys when resuming — they are never saved to disk
+        st.session_state["_needs_keys_to_continue"] = True
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -278,6 +277,9 @@ elif st.session_state.phase == "setup":
 # ── Phase: skills ─────────────────────────────────────────────────────────────
 
 elif st.session_state.phase == "skills":
+    if not has_keys():
+        st.session_state.phase = "setup"
+        st.rerun()
     if prompt := st.chat_input("Tell me your skills (e.g. Python, machine learning, React)..."):
         with st.chat_message("user"):
             st.markdown(prompt)
